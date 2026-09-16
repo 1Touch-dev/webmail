@@ -53,7 +53,7 @@ import { Mailbox } from "@/lib/jmap/types";
 import { useContextMenu } from "@/hooks/use-context-menu";
 import { MailboxContextMenu, type MailboxContextTarget } from "./mailbox-context-menu";
 import { useAccountStore } from '@/stores/account-store';
-import { UNIFIED_MAILBOX_IDS, CROSS_VIEW_IDS } from '@/lib/jmap/types';
+import { UNIFIED_MAILBOX_IDS, CROSS_VIEW_IDS, DOMAIN_INBOX_ID } from '@/lib/jmap/types';
 import type { UnifiedMailboxRole } from '@/lib/jmap/types';
 import { useDragDropContext } from "@/contexts/drag-drop-context";
 import { useMailboxDrop } from "@/hooks/use-mailbox-drop";
@@ -888,6 +888,10 @@ export function Sidebar({
   const accounts = useAccountStore(s => s.accounts);
   const connectedAccounts = accounts.filter(a => a.isConnected);
   const hasGroupInboxes = useMemo(() => mailboxes.some(m => m.isShared), [mailboxes]);
+  const showDomainInbox = useMemo(
+    () => mailboxes.some(m => m.isShared && m.role === 'inbox'),
+    [mailboxes],
+  );
   // Pro shell treats the unified mailbox as a core part of the multi-account
   // UI, so it ignores the user-facing `enableUnifiedMailbox` toggle. With a
   // single account we still surface unified when the user has opted into
@@ -1214,7 +1218,7 @@ export function Sidebar({
 
       {/* Mailbox List */}
       <div className="flex-1 overflow-y-auto" data-tour="sidebar">
-        {(showUnified || showCrossUnread || showCrossStarred || showCrossAll) && (
+        {(showUnified || showDomainInbox || showCrossUnread || showCrossStarred || showCrossAll) && (
           <div>
             <SidebarSectionHeader
               label={t(crossAccountActive ? "all_accounts" : "unified_mailbox")}
@@ -1225,6 +1229,20 @@ export function Sidebar({
             />
             {((unifiedExpanded && !isCollapsed) || isCollapsed) && (
               <>
+                {showDomainInbox && (
+                  <SidebarRow
+                    key={DOMAIN_INBOX_ID}
+                    icon={<Users className={getIconClass(selectedMailbox === DOMAIN_INBOX_ID, false, colorfulSidebarIcons, 'shared')} />}
+                    label="Domain Inbox"
+                    testRole="inbox"
+                    testName="domain-inbox"
+                    testMailboxId={DOMAIN_INBOX_ID}
+                    depth={0}
+                    isSelected={!selectedKeyword && selectedMailbox === DOMAIN_INBOX_ID}
+                    onClick={() => onMailboxSelect?.(DOMAIN_INBOX_ID)}
+                    isCollapsed={isCollapsed}
+                  />
+                )}
                 {showUnified && unifiedCounts.map((count) => {
                   const unifiedId = UNIFIED_MAILBOX_IDS[count.role];
                   const Icon = getUnifiedIcon(count.role);

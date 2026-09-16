@@ -916,6 +916,7 @@ export function isUnifiedMailboxId(id: string): boolean {
 export const CROSS_UNREAD = '__cross_unread__';
 export const CROSS_STARRED = '__cross_starred__';
 export const CROSS_ALL = '__cross_all__';
+export const DOMAIN_INBOX_ID = '__domain_inbox__';
 
 export type CrossView = 'unread' | 'starred' | 'all';
 
@@ -931,6 +932,10 @@ export const CROSS_VIEW_BY_ID: Record<string, CrossView> = Object.fromEntries(
 
 export function isCrossViewId(id: string): boolean {
   return id in CROSS_VIEW_BY_ID;
+}
+
+export function isDomainInboxId(id: string): boolean {
+  return id === DOMAIN_INBOX_ID;
 }
 
 /**

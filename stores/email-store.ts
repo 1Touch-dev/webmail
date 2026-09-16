@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { Email, Mailbox, StateChange, ScheduledEmail, SendEmailResult, isUnifiedMailboxId, isCrossViewId } from "@/lib/jmap/types";
+import { Email, Mailbox, StateChange, ScheduledEmail, SendEmailResult, isUnifiedMailboxId, isCrossViewId, isDomainInboxId, DOMAIN_INBOX_ID } from "@/lib/jmap/types";
 import type { UnifiedMailboxRole, CrossView } from "@/lib/jmap/types";
 import type { IJMAPClient } from "@/lib/jmap/client-interface";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -674,6 +674,24 @@ export async function buildUnifiedAccountClients(
   return built;
 }
 
+export async function buildDomainInboxAccountClients(): Promise<UnifiedAccountClient[]> {
+  const activeId = useAccountStore.getState().activeAccountId ?? undefined;
+  const built = await buildUnifiedAccountClients({
+    includeGroup: true,
+    scopeToClientAccountId: activeId,
+  });
+  return built.filter((account) => account.isShared);
+}
+
+async function buildUnifiedAccountClientsForSelectedView(
+  includeGroup: boolean,
+): Promise<UnifiedAccountClient[]> {
+  if (useEmailStore.getState().selectedMailbox === DOMAIN_INBOX_ID) {
+    return buildDomainInboxAccountClients();
+  }
+  return buildUnifiedAccountClients({ includeGroup });
+}
+
 /**
  * After a mailbox-list mutation (create/rename/delete/etc.), refresh the
  * cache for whichever account we're operating on. Writes the result to the
@@ -1219,6 +1237,7 @@ export const useEmailStore = create<EmailStore>((set, get) => ({
         // the user back to the inbox.
         || isUnifiedMailboxId(currentSelectedMailbox)
         || isCrossViewId(currentSelectedMailbox)
+        || isDomainInboxId(currentSelectedMailbox)
         || (currentSelectedMailbox && mailboxes.some(m => m.id === currentSelectedMailbox));
       const loadingPatch = isInitialLoad ? { isLoading: false } : {};
       if (!selectionValid) {
@@ -1298,7 +1317,7 @@ export const useEmailStore = create<EmailStore>((set, get) => ({
         }
         const emailsPerPage = useSettingsStore.getState().emailsPerPage;
         const includeGroup = useSettingsStore.getState().includeGroupInUnified;
-        const built = await buildUnifiedAccountClients({ includeGroup });
+        const built = await buildUnifiedAccountClientsForSelectedView(includeGroup);
         const hasFilters = !isFilterEmpty(searchFilters);
         const result = crossView
           ? (hasFilters
@@ -1404,7 +1423,7 @@ export const useEmailStore = create<EmailStore>((set, get) => ({
         const emailsPerPage = useSettingsStore.getState().emailsPerPage;
         const includeGroup = useSettingsStore.getState().includeGroupInUnified;
         const position = emails.length;
-        const built = await buildUnifiedAccountClients({ includeGroup });
+        const built = await buildUnifiedAccountClientsForSelectedView(includeGroup);
         const hasFilters = !isFilterEmpty(get().searchFilters);
         const result = hasFilters
           ? await advancedSearchCrossViewEmails(built, crossView, buildJMAPFilter(searchQuery, get().searchFilters, undefined), emailsPerPage, position)
@@ -1441,7 +1460,7 @@ export const useEmailStore = create<EmailStore>((set, get) => ({
         const emailsPerPage = useSettingsStore.getState().emailsPerPage;
         const includeGroup = useSettingsStore.getState().includeGroupInUnified;
         const position = emails.length;
-        const built = await buildUnifiedAccountClients({ includeGroup });
+        const built = await buildUnifiedAccountClientsForSelectedView(includeGroup);
         const { searchFilters } = get();
         const hasFilters = !isFilterEmpty(searchFilters);
         const result = hasFilters
@@ -2271,13 +2290,13 @@ export const useEmailStore = create<EmailStore>((set, get) => ({
 
       if (isUnifiedView && crossView) {
         const includeGroup = useSettingsStore.getState().includeGroupInUnified;
-        const built = await buildUnifiedAccountClients({ includeGroup });
+        const built = await buildUnifiedAccountClientsForSelectedView(includeGroup);
         result = await searchCrossViewEmails(built, crossView, query, emailsPerPage, 0);
         unifiedErrors = result.errors;
         
       } else if (isUnifiedView && unifiedRole) {
         const includeGroup = useSettingsStore.getState().includeGroupInUnified;
-        const built = await buildUnifiedAccountClients({ includeGroup });
+        const built = await buildUnifiedAccountClientsForSelectedView(includeGroup);
         result = await searchUnifiedEmails(built, unifiedRole, query, emailsPerPage, 0);
         unifiedErrors = result.errors;
 
@@ -2360,7 +2379,7 @@ export const useEmailStore = create<EmailStore>((set, get) => ({
 
       if (isUnifiedView && crossView) {
         const includeGroup = useSettingsStore.getState().includeGroupInUnified;
-        const built = await buildUnifiedAccountClients({ includeGroup });
+        const built = await buildUnifiedAccountClientsForSelectedView(includeGroup);
         // Cross views apply the advanced filter (text + fields) on top of the
         // view membership; an empty filter degrades to a plain membership query.
         result = await advancedSearchCrossViewEmails(
@@ -2370,7 +2389,7 @@ export const useEmailStore = create<EmailStore>((set, get) => ({
 
       } else if (isUnifiedView && unifiedRole) {
         const includeGroup = useSettingsStore.getState().includeGroupInUnified;
-        const built = await buildUnifiedAccountClients({ includeGroup });
+        const built = await buildUnifiedAccountClientsForSelectedView(includeGroup);
         result = await advancedSearchUnifiedEmails(
           built,
           unifiedRole,
@@ -2999,11 +3018,11 @@ export const useEmailStore = create<EmailStore>((set, get) => ({
       // Refresh the view the user is actually looking at.
       if (get().isUnifiedView && get().crossView) {
         const includeGroup = useSettingsStore.getState().includeGroupInUnified;
-        const accounts = await buildUnifiedAccountClients({ includeGroup });
+        const accounts = await buildUnifiedAccountClientsForSelectedView(includeGroup);
         await get().fetchCrossView(accounts, get().crossView!);
       } else if (get().isUnifiedView && get().unifiedRole) {
         const includeGroup = useSettingsStore.getState().includeGroupInUnified;
-        const accounts = await buildUnifiedAccountClients({ includeGroup });
+        const accounts = await buildUnifiedAccountClientsForSelectedView(includeGroup);
         await get().fetchUnifiedEmails(accounts, get().unifiedRole!);
       } else {
         await get().fetchEmails(client, selectedMailbox);
@@ -3264,7 +3283,7 @@ export const useEmailStore = create<EmailStore>((set, get) => ({
       let unifiedErrors: Map<string, string> | undefined;
       if (isUnifiedView && crossView) {
         const includeGroup = useSettingsStore.getState().includeGroupInUnified;
-        const built = await buildUnifiedAccountClients({ includeGroup });
+        const built = await buildUnifiedAccountClientsForSelectedView(includeGroup);
         result = hasFilters
           ? await advancedSearchCrossViewEmails(built, crossView, buildJMAPFilter(searchQuery, searchFilters, undefined), emailsPerPage, 0)
           : searchQuery
@@ -3273,7 +3292,7 @@ export const useEmailStore = create<EmailStore>((set, get) => ({
         unifiedErrors = result.errors;
       } else if (isUnifiedView && unifiedRole) {
         const includeGroup = useSettingsStore.getState().includeGroupInUnified;
-        const built = await buildUnifiedAccountClients({ includeGroup });
+        const built = await buildUnifiedAccountClientsForSelectedView(includeGroup);
         result = hasFilters
           ? await advancedSearchUnifiedEmails(built, unifiedRole, (mailboxId) => buildJMAPFilter(searchQuery, searchFilters, mailboxId), emailsPerPage, 0)
           : searchQuery

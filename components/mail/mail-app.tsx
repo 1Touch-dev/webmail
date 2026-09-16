@@ -25,7 +25,7 @@ const EmailComposer = dynamic(
 import { ProtocolAccountPicker } from "@/components/protocol/protocol-account-picker";
 import { ThreadConversationView } from "@/components/email/thread-conversation-view";
 import { MobileHeader } from "@/components/layout/mobile-header";
-import { ThreadGroup, Email, Mailbox, isUnifiedMailboxId, UNIFIED_ROLE_BY_ID, CROSS_VIEW_BY_ID, isCrossViewId } from "@/lib/jmap/types";
+import { ThreadGroup, Email, Mailbox, isUnifiedMailboxId, UNIFIED_ROLE_BY_ID, CROSS_VIEW_BY_ID, isCrossViewId, DOMAIN_INBOX_ID, isDomainInboxId } from "@/lib/jmap/types";
 import { useAccountStore } from "@/stores/account-store";
 import { usePolicyStore } from "@/stores/policy-store";
 import type { UnifiedAccountClient } from "@/lib/unified-mailbox";
@@ -475,6 +475,15 @@ export function MailApp({ linkSegments }: MailAppProps = {}) {
         ? undefined
         : (useAccountStore.getState().activeAccountId ?? undefined),
     });
+  }, []);
+
+  const buildDomainInboxAccounts = useCallback(async (): Promise<UnifiedAccountClient[]> => {
+    const activeId = useAccountStore.getState().activeAccountId ?? undefined;
+    const built = await buildUnifiedAccountClients({
+      includeGroup: true,
+      scopeToClientAccountId: activeId,
+    });
+    return built.filter((account) => account.isShared);
   }, []);
 
   const getMailtoProtocolAccounts = useCallback(() => {
@@ -2377,6 +2386,38 @@ export function MailApp({ linkSegments }: MailAppProps = {}) {
         setTabletListVisible(true);
       }
       if (client) await fetchScheduledEmails(client);
+      return;
+    }
+
+    if (isDomainInboxId(mailboxId)) {
+      setScheduledView(false);
+      selectMailbox(DOMAIN_INBOX_ID);
+      selectEmail(null);
+
+      if (isMobile) {
+        setSidebarOpen(false);
+        setActiveView("list");
+      }
+      if (isTablet) {
+        setTabletListVisible(true);
+      }
+
+      const populated = await buildDomainInboxAccounts();
+      if (populated.length === 0) {
+        useEmailStore.setState({
+          isUnifiedView: true,
+          unifiedRole: 'inbox',
+          crossView: null,
+          emails: [],
+          totalEmails: 0,
+          hasMoreEmails: false,
+          unifiedErrors: new Map(),
+        });
+        toast.info('No delegated domain inboxes are visible for this account yet.');
+        return;
+      }
+
+      await fetchUnifiedEmailsAction(populated, 'inbox');
       return;
     }
 
