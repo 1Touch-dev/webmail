@@ -16,6 +16,7 @@ import {
   readImpersonationConfig,
   resolveImpersonationServerUrl,
 } from '@/lib/impersonation/master-config';
+import { setImpersonationContextInStore } from '@/lib/impersonation/context';
 
 export const runtime = 'nodejs';
 
@@ -111,6 +112,15 @@ export async function GET(request: NextRequest) {
     serverUrl: normalizedServerUrl,
     username: impersonatedUsername,
     authHeader,
+  });
+  setImpersonationContextInStore(cookieStore, IMPERSONATION_SLOT, {
+    mailbox: claims.mailbox,
+    mailboxId: claims.mailbox_id,
+    tenantId: claims.tenant_id,
+    actorUserId: claims.actor_user_id,
+    grantJti: claims.jti,
+    issuer: claims.iss,
+    slot: IMPERSONATION_SLOT,
   });
 
   // Structured audit log - operators rely on this for security review.

@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import { createHmac } from 'node:crypto';
 import {
   ImpersonationJwtError,
+  signImpersonationJwt,
   verifyImpersonationJwt,
   impersonationReplayCache,
 } from '@/lib/impersonation/jwt';
@@ -45,6 +46,25 @@ describe('verifyImpersonationJwt', () => {
     const token = sign(basePayload());
     const claims = verifyImpersonationJwt(token, SECRET, { expectedIssuer: ISSUER });
     expect(claims.mailbox).toBe('alice@example.test');
+  });
+
+  it('signs and verifies extra mailbox context claims', () => {
+    const now = Math.floor(Date.now() / 1000);
+    const token = signImpersonationJwt({
+      iss: ISSUER,
+      iat: now,
+      exp: now + 120,
+      jti: 'ctx-1',
+      mailbox: 'alice@example.test',
+      tenant_id: 'tenant-1',
+      actor_user_id: 'user-1',
+      mailbox_id: 'mailbox-1',
+      slot: 0,
+    }, SECRET);
+    const claims = verifyImpersonationJwt(token, SECRET, { expectedIssuer: ISSUER });
+    expect(claims.mailbox_id).toBe('mailbox-1');
+    expect(claims.actor_user_id).toBe('user-1');
+    expect(claims.slot).toBe(0);
   });
 
   it('rejects non-HS256 algorithms', () => {

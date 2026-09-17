@@ -681,15 +681,24 @@ export const useAuthStore = create<AuthState>()(
 
           const effectiveAuthMode = upgradedToOAuth ? 'oauth' : 'basic';
 
-          // Run the remaining independent requests in parallel. The session
-          // write and stalwart-context write are best-effort persistence; the
-          // outer login still succeeds even if they log a warning. Errors are
-          // caught locally so Promise.all doesn't reject on either.
-          const sessionWrite: Promise<unknown> = (rememberMe && !upgradedToOAuth)
+          // Run the remaining independent requests in parallel. Basic auth
+          // should survive a page refresh even when "Remember me" is off, so
+          // we always write a session cookie; the flag only controls whether
+          // that cookie survives a browser restart. Stalwart-context writes
+          // stay best-effort; the outer login still succeeds even if either
+          // logs a warning. Errors are caught locally so Promise.all doesn't
+          // reject on either.
+          const sessionWrite: Promise<unknown> = (!upgradedToOAuth)
             ? apiFetch(`/api/auth/session?slot=${cookieSlot}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ serverUrl, username, password, slot: cookieSlot }),
+                body: JSON.stringify({
+                  serverUrl,
+                  username,
+                  password,
+                  slot: cookieSlot,
+                  persistent: !!rememberMe,
+                }),
               }).then((res) => {
                 if (!res.ok) debug.error('Failed to store session: server returned', res.status);
               }).catch((err) => debug.error('Failed to store session:', err))
@@ -1686,14 +1695,10 @@ export const useAuthStore = create<AuthState>()(
           const restoreAccount = async (account: (typeof accounts)[number]) => {
             if (clients.has(account.id)) return; // Already connected
 
-            // Basic auth without rememberMe leaves nothing to restore - the
-            // user logged in without persisting credentials. Evict silently
-            // so the login screen is shown without flagging a fake error.
-            if (account.authMode === 'basic' && !account.rememberMe) {
-              evictAccount(account.id);
-              accountStore.removeAccount(account.id);
-              return;
-            }
+            // Even without "Remember me", a basic-auth browser session should
+            // survive a refresh until the browser session cookie disappears.
+            // If that cookie is gone (for example after a browser restart),
+            // the definitive 401 path below still evicts the stale account.
 
             try {
               if (account.authMode === 'oauth') {

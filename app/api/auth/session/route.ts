@@ -20,11 +20,15 @@ import { recordLogin } from '@/lib/telemetry/login-tracker';
 import { parseJmapServers, resolveTrustedJmapUrl } from '@/lib/admin/jmap-servers';
 import { MAX_ACCOUNT_SLOTS } from '@/lib/account-utils';
 
-function sessionCookieOptions() {
-  return {
-    ...getCookieOptions(),
-    maxAge: SESSION_COOKIE_MAX_AGE,
-  };
+function sessionCookieOptions(persistent = true) {
+  return persistent
+    ? {
+        ...getCookieOptions(),
+        maxAge: SESSION_COOKIE_MAX_AGE,
+      }
+    : {
+        ...getCookieOptions(),
+      };
 }
 
 function getSlot(request: NextRequest): number {
@@ -43,7 +47,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Basic authentication is disabled' }, { status: 403 });
     }
 
-    const { serverUrl, username, password, slot: bodySlot } = await request.json();
+    const {
+      serverUrl,
+      username,
+      password,
+      slot: bodySlot,
+      persistent = true,
+    } = await request.json();
     if (!serverUrl || !username || !password) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
@@ -90,7 +100,7 @@ export async function POST(request: NextRequest) {
       : await verifyJmapAuth(upstreamUrl, authHeader, { trusted: false });
     const token = encryptSession(normalizedServerUrl, username, password);
     const cookieStore = await cookies();
-    cookieStore.set(cookieName, token, sessionCookieOptions());
+    cookieStore.set(cookieName, token, sessionCookieOptions(Boolean(persistent)));
     setStalwartAuthContextInStore(cookieStore, slot, {
       serverUrl: normalizedServerUrl,
       username,

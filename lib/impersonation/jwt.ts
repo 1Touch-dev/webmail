@@ -20,6 +20,8 @@ export interface ImpersonationClaims {
   mailbox: string;
   tenant_id?: string;
   actor_user_id?: string;
+  mailbox_id?: string;
+  slot?: number;
 }
 
 const MAX_TOKEN_LIFETIME_SEC = 300;
@@ -52,6 +54,32 @@ function assertNumber(value: unknown, field: string): number {
     throw new ImpersonationJwtError('claims', `Missing or invalid '${field}' claim`);
   }
   return value;
+}
+
+function base64UrlEncode(input: Buffer | string): string {
+  return Buffer.from(input)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+export function signImpersonationJwt(
+  claims: ImpersonationClaims,
+  secret: string,
+): string {
+  if (typeof secret !== 'string' || secret.length < MIN_SECRET_LENGTH) {
+    throw new ImpersonationJwtError(
+      'config',
+      `BULWARK_JWT_AUTH_SECRET must be at least ${MIN_SECRET_LENGTH} characters`,
+      500,
+    );
+  }
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const headerB64 = base64UrlEncode(JSON.stringify(header));
+  const payloadB64 = base64UrlEncode(JSON.stringify(claims));
+  const signature = createHmac('sha256', secret).update(`${headerB64}.${payloadB64}`).digest();
+  return `${headerB64}.${payloadB64}.${base64UrlEncode(signature)}`;
 }
 
 /**
@@ -136,6 +164,8 @@ export function verifyImpersonationJwt(
   if (typeof payload.nbf === 'number') claims.nbf = payload.nbf;
   if (typeof payload.tenant_id === 'string') claims.tenant_id = payload.tenant_id;
   if (typeof payload.actor_user_id === 'string') claims.actor_user_id = payload.actor_user_id;
+  if (typeof payload.mailbox_id === 'string') claims.mailbox_id = payload.mailbox_id;
+  if (typeof payload.slot === 'number' && Number.isFinite(payload.slot)) claims.slot = payload.slot;
   return claims;
 }
 

@@ -8,6 +8,7 @@ import { debug } from "@/lib/debug";
 import { normalizeCalendarEventLike } from "@/lib/calendar-event-normalization";
 import { findTasksOnlyCalendarIds, isTaskLikeObject, type ScannedCalendarObject } from "@/lib/calendar-component-detection";
 import { sanitizeDisplayName, splitMailbox } from "@/lib/rfc5322-mailbox";
+import { getActiveAccountSlotHeaders } from "@/lib/auth/active-account-slot";
 
 /**
  * Parse a recipient string that may be "Name <email>" or bare "email" into
@@ -81,6 +82,13 @@ export class RequestTimeoutError extends Error {
   constructor(timeoutMs: number) {
     super(`Request timed out after ${Math.round(timeoutMs / 1000)}s`);
     this.name = 'RequestTimeoutError';
+  }
+}
+
+export class ImpersonationAuditError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ImpersonationAuditError';
   }
 }
 
@@ -646,12 +654,40 @@ export class JMAPClient implements IJMAPClient {
     this.authHeader = `Bearer ${token}`;
   }
 
+  private isImpersonatedSession(): boolean {
+    return this.username.includes('%');
+  }
+
+  private async auditImpersonatedRead(event: Record<string, unknown>): Promise<void> {
+    if (!this.isImpersonatedSession()) return;
+    const response = await fetch('/api/auth/impersonate/audit', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getActiveAccountSlotHeaders(),
+      },
+      body: JSON.stringify(event),
+      cache: 'no-store',
+    });
+    if (response.ok) return;
+    const text = await response.text();
+    throw new ImpersonationAuditError(
+      text || `Impersonation audit failed: ${response.status}`,
+    );
+  }
+
   async getSomeEmails(emailsId: string[], accountId?: string): Promise<Email[]> {
     try {
       const targetAccountId = accountId || this.accountId;
       if (!emailsId || emailsId.length === 0) {
         return [];
       }
+      await this.auditImpersonatedRead({
+        kind: 'email_get',
+        account_id: targetAccountId,
+        email_ids: emailsId,
+      });
 
       const emails: Email[] = [];
 
@@ -1281,6 +1317,14 @@ export class JMAPClient implements IJMAPClient {
   async getEmails(mailboxId?: string, accountId?: string, limit: number = 50, position: number = 0, hasKeyword?: string, pinnedFirst?: boolean, extraFilter?: Record<string, unknown>): Promise<{ emails: Email[], hasMore: boolean, total: number }> {
     try {
       const targetAccountId = accountId || this.accountId;
+      await this.auditImpersonatedRead({
+        kind: 'email_list',
+        account_id: targetAccountId,
+        mailbox_id: mailboxId,
+        mailbox_role: mailboxId ? undefined : 'all',
+        position,
+        limit,
+      });
       const simple: { inMailbox?: string; hasKeyword?: string } = {};
       if (mailboxId) {
         simple.inMailbox = mailboxId;
@@ -1607,6 +1651,11 @@ export class JMAPClient implements IJMAPClient {
   async getEmail(emailId: string, accountId?: string): Promise<Email | null> {
     try {
       const targetAccountId = accountId || this.accountId;
+      await this.auditImpersonatedRead({
+        kind: 'email_get',
+        account_id: targetAccountId,
+        email_id: emailId,
+      });
 
       const response = await this.request([
         ["Email/get", {
@@ -2380,6 +2429,14 @@ export class JMAPClient implements IJMAPClient {
   async searchEmails(query: string, mailboxId?: string, accountId?: string, limit: number = 50, position: number = 0): Promise<{ emails: Email[], hasMore: boolean, total: number }> {
     try {
       const targetAccountId = accountId || this.accountId;
+      await this.auditImpersonatedRead({
+        kind: 'email_search',
+        account_id: targetAccountId,
+        mailbox_id: mailboxId,
+        query_present: query.trim().length > 0,
+        position,
+        limit,
+      });
 
       // Use the JMAP "text" filter which searches across from, to, cc, bcc,
       // subject, and body. Stalwart's FTS engine supports wildcard prefix
@@ -2446,6 +2503,13 @@ export class JMAPClient implements IJMAPClient {
   ): Promise<{ emails: Email[], hasMore: boolean, total: number }> {
     try {
       const targetAccountId = accountId || this.accountId;
+      await this.auditImpersonatedRead({
+        kind: 'email_search',
+        account_id: targetAccountId,
+        query_present: Object.keys(filter).length > 0,
+        position,
+        limit,
+      });
 
       // Searching all folders with no criteria yields an empty FilterCondition,
       // which servers reject; omit the key entirely to mean "no filter".
@@ -2585,6 +2649,11 @@ export class JMAPClient implements IJMAPClient {
   async getThreadEmails(threadId: string, accountId?: string): Promise<Email[]> {
     try {
       const targetAccountId = accountId || this.accountId;
+      await this.auditImpersonatedRead({
+        kind: 'thread_get',
+        account_id: targetAccountId,
+        thread_id: threadId,
+      });
       const thread = await this.getThread(threadId, accountId);
       if (!thread?.emailIds?.length) {
         return [];
@@ -3965,6 +4034,13 @@ export class JMAPClient implements IJMAPClient {
   }
 
   async fetchBlob(blobId: string, name?: string, type?: string, accountId?: string): Promise<Blob> {
+    await this.auditImpersonatedRead({
+      kind: 'blob_get',
+      account_id: accountId || this.accountId,
+      blob_id: blobId,
+      file_name: name,
+      content_type: type,
+    });
     const url = this.getBlobDownloadUrl(blobId, name, type, accountId);
     const response = await this.authenticatedFetch(url, {}, { timeoutMs: JMAPClient.TRANSFER_TIMEOUT_MS });
     if (!response.ok) {
@@ -6952,6 +7028,14 @@ export class JMAPClient implements IJMAPClient {
 
   /** Fetch blob content as an ArrayBuffer (for S/MIME byte processing). */
   async fetchBlobArrayBuffer(blobId: string, name?: string, type?: string, accountId?: string, rangeHeader?: number): Promise<ArrayBuffer> {
+    await this.auditImpersonatedRead({
+      kind: 'blob_get',
+      account_id: accountId || this.accountId,
+      blob_id: blobId,
+      file_name: name,
+      content_type: type,
+      limit: rangeHeader,
+    });
     const url = this.getBlobDownloadUrl(blobId, name, type, accountId);
     const response = await this.authenticatedFetch(url, { }, { timeoutMs: JMAPClient.TRANSFER_TIMEOUT_MS });
     if (!response.ok) {
