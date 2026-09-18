@@ -790,7 +790,7 @@ export default function LoginPage() {
             <div className="px-8 pt-12 pb-4 text-center">
               <div className="inline-flex items-center justify-center w-20 h-20 mb-6">
                 <img
-                  src={withBasePath(resolvedTheme === 'dark' ? loginLogoDarkUrl : loginLogoLightUrl)}
+                  src={withBasePath(resolvedTheme === 'dark' ? '/branding/thunder-marketing-logo-white.svg' : '/branding/thunder-marketing-logo.svg')}
                   alt={appName}
                   className="max-w-20 max-h-20 object-contain"
                 />
@@ -943,7 +943,7 @@ export default function LoginPage() {
           <div className="px-8 pt-10 pb-6 text-center">
             <div className={cn("inline-flex items-center justify-center mb-5", !hasLogoSize && "w-16 h-16")}>
               <img
-                src={withBasePath(resolvedTheme === 'dark' ? loginLogoDarkUrl : loginLogoLightUrl)}
+                src={withBasePath(resolvedTheme === 'dark' ? '/branding/thunder-marketing-logo-white.svg' : '/branding/thunder-marketing-logo.svg')}
                 alt={appName}
                 className={cn("object-contain", !hasLogoSize && "max-w-16 max-h-16")}
                 style={loginLogoStyle}
